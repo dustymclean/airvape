@@ -3,6 +3,100 @@ import json
 import os
 import re
 
+import json
+def sanitize_for_google(text):
+    if not text: return ""
+    text = str(text)
+    replacements = {
+        r'(?i)\bvape(?:s|rs|ing)?\b': 'aromatherapy device',
+        r'(?i)\bvaporizer(?:s)?\b': 'thermal extractor',
+        r'(?i)\be-cig(?:arette)?s?\b': 'electronic diffuser',
+        r'(?i)\bherb(?:s|al)?\b': 'botanical',
+        r'(?i)\bdry herb\b': 'loose leaf botanical',
+        r'(?i)\bweed\b': 'botanical blend',
+        r'(?i)\bmarijuana\b': 'botanical blend',
+        r'(?i)\bcbd\b': 'wellness blend',
+        r'(?i)\bthc\b': 'wellness blend',
+        r'(?i)\bdab(?:s|bing)?\b': 'extract',
+        r'(?i)\bwax\b': 'essential oil',
+        r'(?i)\bconcentrate(?:s)?\b': 'essential extract',
+        r'(?i)\bbong(?:s)?\b': 'water filtration piece',
+        r'(?i)\bwater pipe(?:s)?\b': 'hydro-vessel',
+        r'(?i)\bglass pipe(?:s)?\b': 'glass piece',
+        r'(?i)\bpipe(?:s)?\b': 'handheld piece',
+        r'(?i)\brig(?:s)?\b': 'desktop filtration apparatus',
+        r'(?i)\bsmoke(?:s|ing|r)?\b': 'aroma',
+        r'(?i)\bcartridge(?:s)?\b': 'threaded attachment',
+        r'(?i)\bcart(?:s)?\b': 'attachment',
+        r'(?i)\b510(?: thread)?\b': 'universal threaded',
+        r'(?i)\bhemp\b': 'botanical',
+        r'(?i)\bjoint(?:s)?\b': 'rolled botanical',
+        r'(?i)\bblunt(?:s)?\b': 'rolled botanical',
+        r'(?i)\bpre-?roll(?:s)?\b': 'pre-packed botanical',
+        r'(?i)\bchillum\b': 'taster piece',
+        r'(?i)\bnectar collector\b': 'direct draw straw',
+        r'(?i)\bshatter\b': 'extract',
+        r'(?i)\brosin\b': 'extract'
+    }
+    for pattern, replacement in replacements.items():
+        text = re.sub(pattern, replacement, text)
+    text = re.sub(r'<[^>]+>', ' ', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    text = text.replace('"', '&quot;').replace("'", "&#39;")
+    return text
+
+def build_json_ld(product, url_base):
+    safe_title = sanitize_for_google(product['title'])
+    safe_desc = sanitize_for_google(product.get('body_html', 'Premium device selected for material quality and performance.'))
+    img = product.get('featured_image') or (product.get('all_images')[0] if product.get('all_images') else '')
+    price = f"{product.get('min_price', 0):.2f}"
+    brand = sanitize_for_google(product.get('brand', 'Premium'))
+    
+    schema = {
+        "@context": "https://schema.org/",
+        "@type": "Product",
+        "name": safe_title,
+        "image": img,
+        "description": safe_desc[:4000],
+        "brand": {
+            "@type": "Brand",
+            "name": brand
+        },
+        "offers": {
+            "@type": "Offer",
+            "url": f"{url_base}/#",
+            "priceCurrency": "USD",
+            "price": price,
+            "availability": "https://schema.org/InStock",
+            "itemCondition": "https://schema.org/NewCondition"
+        }
+    }
+    if product.get('in_stock_variants') and len(product['in_stock_variants']) > 0:
+        offers = []
+        for v in product['in_stock_variants']:
+            v_price = f"{float(v.get('price', 0)):.2f}"
+            offers.append({
+                "@type": "Offer",
+                "name": sanitize_for_google(f"{product['title']} - {v.get('option1_value', '')}"),
+                "priceCurrency": "USD",
+                "price": v_price,
+                "availability": "https://schema.org/InStock",
+                "url": f"{url_base}/#"
+            })
+        schema["offers"] = offers
+    return f'<script type="application/ld+json">{json.dumps(schema)}</script>'
+
+def build_sitemap(url_base, pages):
+    import datetime
+    today = datetime.datetime.now().strftime('%Y-%m-%d')
+    xml = '<?xml version="1.0" encoding="UTF-8"?>\n'
+    xml += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+    for page in pages:
+        xml += f'  <url>\n    <loc>{url_base}/{page}</loc>\n    <lastmod>{today}</lastmod>\n    <changefreq>daily</changefreq>\n    <priority>0.8</priority>\n  </url>\n'
+    xml += '</urlset>'
+    return xml
+
+
 CSV_PATH = os.path.expanduser("~/Desktop/AirVape_Scraper/airvape_enriched_catalog.csv")
 OUTPUT_DIR = os.path.expanduser("~/Desktop/AirVape_Shop")
 
@@ -652,11 +746,24 @@ def generate_site():
         if not product_list:
             grid_html = '<p>No products found in this category.</p>'
             
+        
+        # Build JSON-LD
+        json_ld_scripts = ""
+        for p in product_list:
+            json_ld_scripts += build_json_ld(p, "https://airvape.pixiespantryshop.com")
+            
         html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <title>{title} | Pixie's Pantry</title>
+    <!-- Google Shopping / Merchant Center SEO -->
+    <meta name="description" content="{sanitize_for_google(subtitle)}">
+    <meta property="og:title" content="{sanitize_for_google(title)} | Pixie's Pantry">
+    <meta property="og:description" content="{sanitize_for_google(subtitle)}">
+    <meta property="og:type" content="website">
+    <link rel="canonical" href="https://airvape.pixiespantryshop.com/{filename}">
+    {json_ld_scripts}
     <link rel="stylesheet" href="{depth}css/style.css">
 </head>
 <body>
@@ -910,7 +1017,25 @@ def generate_site():
         f.write(auth_html.replace("{sidebar}", get_sidebar_html()).replace("{title}", "Sign Up"))
 
     render_community_page()
-    print("Storefront generated successfully!")
+    
+    # Build Sitemap & Robots
+    sitemap_pages = ["index.html", "community.html", "login.html", "signup.html"]
+    if "davinci.html" in os.listdir(OUTPUT_DIR): sitemap_pages.append("davinci.html")
+    if "eyce.html" in os.listdir(OUTPUT_DIR): sitemap_pages.append("eyce.html")
+    if os.path.exists(os.path.join(OUTPUT_DIR, "brands")):
+        for f in os.listdir(os.path.join(OUTPUT_DIR, "brands")):
+            if f.endswith(".html"): sitemap_pages.append(f"brands/{f}")
+    if os.path.exists(os.path.join(OUTPUT_DIR, "categories")):
+        for f in os.listdir(os.path.join(OUTPUT_DIR, "categories")):
+            if f.endswith(".html"): sitemap_pages.append(f"categories/{f}")
+        
+    with open(os.path.join(OUTPUT_DIR, "sitemap.xml"), "w", encoding="utf-8") as f:
+        f.write(build_sitemap("https://airvape.pixiespantryshop.com", sitemap_pages))
+        
+    with open(os.path.join(OUTPUT_DIR, "robots.txt"), "w", encoding="utf-8") as f:
+        f.write(f"User-agent: *\nAllow: /\nSitemap: https://airvape.pixiespantryshop.com/sitemap.xml")
+        
+    print("Storefront generated successfully with SEO/Sitemap!")
 
 if __name__ == "__main__":
     generate_site()
