@@ -467,7 +467,7 @@ def generate_site():
             };
             
             try {
-                const res = await fetch("https://discord.com/api/webhooks/1485760760939417811/p9gAtkJd3-Rw64TlaQK0FjbDrFHPRWq32pcEcl_ZghQ7qa17vnFZsJr3thAjO__xRosE", {
+                const res = await fetch("https://discord.com/api/webhooks/1485836600381542481/opaZtBaCir8BV4fU55jzeBClzuQvXwVoL-P-kzhrepPmqghbhchcld_6SYZOtsRJ2Uw9", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(payload)
